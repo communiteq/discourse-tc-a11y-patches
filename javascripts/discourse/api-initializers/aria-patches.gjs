@@ -85,32 +85,49 @@ function ensureScreenReaderLabelFromTitle(button, debug) {
   });
 }
 
-function replaceSingleLetterVisibleLabel(button, debug) {
-  const title = button.getAttribute("title");
-  if (!title) {
-    return;
-  }
-
+function hideSingleLetterLabelForAT(button, debug) {
   const label = button.querySelector(":scope > .d-button-label");
   if (!label) {
     return;
   }
 
   const text = (label.textContent || "").trim();
-  if (text.length !== 1) {
+  const title = button.getAttribute("title");
+  const fallbackAriaLabel = cleanedAriaLabel(title) || title || "";
+
+  if (text.length === 1) {
+    if (!button.getAttribute("aria-label") && fallbackAriaLabel) {
+      button.setAttribute("aria-label", fallbackAriaLabel);
+    }
+
+    if (label.getAttribute("aria-hidden") !== "true") {
+      label.setAttribute("aria-hidden", "true");
+    }
+
+    if (label.getAttribute("role") !== "presentation") {
+      label.setAttribute("role", "presentation");
+    }
+
+    debugLog(debug, "hide-single-letter-label", {
+      classes: button.className,
+      text,
+      ariaLabel: button.getAttribute("aria-label"),
+    });
+
     return;
   }
 
-  const replacement = cleanedAriaLabel(title) || title;
-  if (!replacement || replacement === text) {
-    return;
+  if (label.getAttribute("aria-hidden") === "true") {
+    label.removeAttribute("aria-hidden");
   }
 
-  label.textContent = replacement;
-  debugLog(debug, "replace-single-letter-label", {
+  if (label.getAttribute("role") === "presentation") {
+    label.removeAttribute("role");
+  }
+
+  debugLog(debug, "show-label-for-at", {
     classes: button.className,
-    from: text,
-    to: replacement,
+    text,
   });
 }
 
@@ -129,7 +146,7 @@ function patchToolbarButton(button, debug) {
   setAriaLabelFromTitle(button, debug);
   removeAriaKeyShortcuts(button, debug);
   ensureScreenReaderLabelFromTitle(button, debug);
-  replaceSingleLetterVisibleLabel(button, debug);
+  hideSingleLetterLabelForAT(button, debug);
 
   if (button.classList.contains("toolbar-popup-menu-options")) {
     button.setAttribute("aria-haspopup", "menu");
