@@ -1,10 +1,13 @@
 import { apiInitializer } from "discourse/lib/api";
 
 const TOOLBAR_BUTTON_SELECTOR = ".d-editor-button-bar .toolbar__button";
+const MENTION_AUTOCOMPLETE_SELECTOR = ".autocomplete.ac-user";
 const PATCH_DEBOUNCE_MS = 60;
+const MENTION_DEBOUNCE_MS = 80;
+const MENTION_LIVE_REGION_ID = "aria-patches-mention-live-region";
 
-function debugLog(enabled, event, payload = {}) {
-  if (!enabled) {
+function debugLog(event, payload = {}) {
+  if (!settings?.aria_patches_debug) {
     return;
   }
 
@@ -20,7 +23,17 @@ function cleanedAriaLabel(title) {
   return title.replace(/\s*\([^)]*\)\s*$/, "").trim();
 }
 
-function setAriaLabelFromTitle(button, debug) {
+function getAccessibleText(element) {
+  return (
+    element?.getAttribute("aria-label") ||
+    element?.getAttribute("title") ||
+    (element?.textContent || "")
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function setAriaLabelFromTitle(button) {
   const title = button.getAttribute("title");
 
   if (!title) {
@@ -31,14 +44,14 @@ function setAriaLabelFromTitle(button, debug) {
 
   if (button.getAttribute("aria-label") !== nextAriaLabel) {
     button.setAttribute("aria-label", nextAriaLabel);
-    debugLog(debug, "set-aria-label", {
+    debugLog("set-aria-label", {
       classes: button.className,
       value: nextAriaLabel,
     });
   }
 }
 
-function ensureScreenReaderLabelFromTitle(button, debug) {
+function ensureScreenReaderLabelFromTitle(button) {
   const title = button.getAttribute("title");
   if (!title) {
     return;
@@ -74,18 +87,27 @@ function ensureScreenReaderLabelFromTitle(button, debug) {
     button.appendChild(srLabel);
   }
 
-  if (button.getAttribute("aria-labelledby") !== srId) {
-    button.setAttribute("aria-labelledby", srId);
+  let changed = false;
+
+  if (!existing) {
+    changed = true;
   }
 
-  debugLog(debug, "set-aria-labelledby", {
-    classes: button.className,
-    id: srId,
-    text: srText,
-  });
+  if (button.getAttribute("aria-labelledby") !== srId) {
+    button.setAttribute("aria-labelledby", srId);
+    changed = true;
+  }
+
+  if (changed) {
+    debugLog("set-aria-labelledby", {
+      classes: button.className,
+      id: srId,
+      text: srText,
+    });
+  }
 }
 
-function hideSingleLetterLabelForAT(button, debug) {
+function hideSingleLetterLabelForAT(button) {
   const label = button.querySelector(":scope > .d-button-label");
   if (!label) {
     return;
@@ -96,90 +118,301 @@ function hideSingleLetterLabelForAT(button, debug) {
   const fallbackAriaLabel = cleanedAriaLabel(title) || title || "";
 
   if (text.length === 1) {
+    let changed = false;
+
     if (!button.getAttribute("aria-label") && fallbackAriaLabel) {
       button.setAttribute("aria-label", fallbackAriaLabel);
+      changed = true;
     }
 
     if (label.getAttribute("aria-hidden") !== "true") {
       label.setAttribute("aria-hidden", "true");
+      changed = true;
     }
 
     if (label.getAttribute("role") !== "presentation") {
       label.setAttribute("role", "presentation");
+      changed = true;
     }
 
-    debugLog(debug, "hide-single-letter-label", {
-      classes: button.className,
-      text,
-      ariaLabel: button.getAttribute("aria-label"),
-    });
+    if (changed) {
+      debugLog("hide-single-letter-label", {
+        classes: button.className,
+        text,
+        ariaLabel: button.getAttribute("aria-label"),
+      });
+    }
 
     return;
   }
 
+  let changed = false;
+
   if (label.getAttribute("aria-hidden") === "true") {
     label.removeAttribute("aria-hidden");
+    changed = true;
   }
 
   if (label.getAttribute("role") === "presentation") {
     label.removeAttribute("role");
+    changed = true;
   }
 
-  debugLog(debug, "show-label-for-at", {
-    classes: button.className,
-    text,
-  });
+  if (changed) {
+    debugLog("show-label-for-at", {
+      classes: button.className,
+      text,
+    });
+  }
 }
 
-function removeAriaKeyShortcuts(button, debug) {
+function removeAriaKeyShortcuts(button) {
   if (!button.hasAttribute("aria-keyshortcuts")) {
     return;
   }
 
   button.removeAttribute("aria-keyshortcuts");
-  debugLog(debug, "remove-aria-keyshortcuts", {
+  debugLog("remove-aria-keyshortcuts", {
     classes: button.className,
   });
 }
 
-function patchToolbarButton(button, debug) {
-  setAriaLabelFromTitle(button, debug);
-  removeAriaKeyShortcuts(button, debug);
-  ensureScreenReaderLabelFromTitle(button, debug);
-  hideSingleLetterLabelForAT(button, debug);
+function patchToolbarButton(button) {
+  setAriaLabelFromTitle(button);
+  removeAriaKeyShortcuts(button);
+  ensureScreenReaderLabelFromTitle(button);
+  hideSingleLetterLabelForAT(button);
 
   if (button.classList.contains("toolbar-popup-menu-options")) {
-    button.setAttribute("aria-haspopup", "menu");
-    debugLog(debug, "set-aria-haspopup", {
-      classes: button.className,
-    });
+    if (button.getAttribute("aria-haspopup") !== "menu") {
+      button.setAttribute("aria-haspopup", "menu");
+      debugLog("set-aria-haspopup", {
+        classes: button.className,
+      });
+    }
   }
 }
 
-function patchAllToolbarButtons(debug) {
+function patchAllToolbarButtons() {
   document.querySelectorAll(TOOLBAR_BUTTON_SELECTOR).forEach((button) => {
-    patchToolbarButton(button, debug);
+    patchToolbarButton(button);
   });
 }
 
-function observeToolbar(debug) {
+function ensureMentionLiveRegion() {
+  let liveRegion = document.getElementById(MENTION_LIVE_REGION_ID);
+
+  if (liveRegion) {
+    return liveRegion;
+  }
+
+  liveRegion = document.createElement("div");
+  liveRegion.id = MENTION_LIVE_REGION_ID;
+  liveRegion.setAttribute("role", "status");
+  liveRegion.setAttribute("aria-live", "polite");
+  liveRegion.setAttribute("aria-atomic", "true");
+  liveRegion.style.position = "absolute";
+  liveRegion.style.width = "1px";
+  liveRegion.style.height = "1px";
+  liveRegion.style.padding = "0";
+  liveRegion.style.margin = "-1px";
+  liveRegion.style.overflow = "hidden";
+  liveRegion.style.clip = "rect(0, 0, 0, 0)";
+  liveRegion.style.whiteSpace = "nowrap";
+  liveRegion.style.border = "0";
+
+  document.body.appendChild(liveRegion);
+  return liveRegion;
+}
+
+function patchMentionAutocompleteA11y(container) {
+  const list = container.querySelector("ul");
+  if (list) {
+    list.setAttribute("role", "listbox");
+  }
+
+  const options = container.querySelectorAll("li a");
+  options.forEach((option) => {
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", option.classList.contains("selected") ? "true" : "false");
+  });
+}
+
+function buildMentionAnnouncement(container) {
+  const options = Array.from(container.querySelectorAll("li a"));
+  const count = options.length;
+
+  if (count === 0) {
+    return "No mention suggestions.";
+  }
+
+  const selected = container.querySelector("li a.selected");
+  if (selected) {
+    const selectedText = getAccessibleText(selected);
+    if (selectedText) {
+      return `${count} mention suggestions. Selected ${selectedText}.`;
+    }
+  }
+
+  return `${count} mention suggestions available.`;
+}
+
+function patchMentionAutocompletes(state) {
+  const liveRegion = ensureMentionLiveRegion();
+  const containers = document.querySelectorAll(MENTION_AUTOCOMPLETE_SELECTOR);
+
+  if (containers.length === 0) {
+    if (state.lastAnnouncement) {
+      liveRegion.textContent = "Mention suggestions closed.";
+      state.lastAnnouncement = "";
+      debugLog("mention-live-close");
+    }
+    return;
+  }
+
+  containers.forEach((container) => {
+    patchMentionAutocompleteA11y(container);
+    const message = buildMentionAnnouncement(container);
+
+    if (message && message !== state.lastAnnouncement) {
+      liveRegion.textContent = message;
+      state.lastAnnouncement = message;
+      debugLog("mention-live-announce", { message });
+    }
+  });
+}
+
+function observeMentionAutocomplete() {
   let isPatching = false;
   let debounceTimer = null;
+  let bodyObserver = null;
+  let visibilityHandler = null;
+  const containerObservers = new Map();
+  const state = {
+    lastAnnouncement: "",
+  };
+
+  const schedulePatch = () => {
+    if (document.hidden) {
+      return;
+    }
+
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      runPatch();
+    }, MENTION_DEBOUNCE_MS);
+  };
+
+  const syncContainerObservers = () => {
+    const currentContainers = new Set(
+      document.querySelectorAll(MENTION_AUTOCOMPLETE_SELECTOR)
+    );
+
+    currentContainers.forEach((container) => {
+      if (containerObservers.has(container)) {
+        return;
+      }
+
+      const observer = new MutationObserver(() => {
+        schedulePatch();
+      });
+
+      observer.observe(container, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class", "title"],
+      });
+
+      containerObservers.set(container, observer);
+    });
+
+    Array.from(containerObservers.keys()).forEach((container) => {
+      if (currentContainers.has(container)) {
+        return;
+      }
+
+      containerObservers.get(container)?.disconnect();
+      containerObservers.delete(container);
+    });
+  };
 
   const runPatch = () => {
-    if (isPatching) {
+    if (isPatching || document.hidden) {
       return;
     }
 
     isPatching = true;
     try {
-      patchAllToolbarButtons(debug);
+      syncContainerObservers();
+      patchMentionAutocompletes(state);
     } finally {
       isPatching = false;
     }
   };
 
-  const observer = new MutationObserver(() => {
+  bodyObserver = new MutationObserver((mutations) => {
+    const hasRelevantChildMutation = mutations.some(
+      (mutation) =>
+        mutation.type === "childList" &&
+        ([...mutation.addedNodes, ...mutation.removedNodes].some(
+          (node) =>
+            node.nodeType === Node.ELEMENT_NODE &&
+            (node.matches?.(MENTION_AUTOCOMPLETE_SELECTOR) ||
+              node.querySelector?.(MENTION_AUTOCOMPLETE_SELECTOR))
+        ) || mutation.target.closest?.(MENTION_AUTOCOMPLETE_SELECTOR))
+    );
+
+    if (hasRelevantChildMutation) {
+      schedulePatch();
+    }
+  });
+
+  bodyObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+
+  visibilityHandler = () => {
+    if (!document.hidden) {
+      schedulePatch();
+    }
+  };
+
+  document.addEventListener("visibilitychange", visibilityHandler);
+  runPatch();
+
+  return {
+    disconnect() {
+      bodyObserver?.disconnect();
+      containerObservers.forEach((observer) => observer.disconnect());
+      containerObservers.clear();
+
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+
+      if (visibilityHandler) {
+        document.removeEventListener("visibilitychange", visibilityHandler);
+      }
+    },
+  };
+}
+
+function observeToolbar() {
+  let isPatching = false;
+  let debounceTimer = null;
+  let visibilityHandler = null;
+
+  const schedulePatch = () => {
+    if (document.hidden) {
+      return;
+    }
+
     if (debounceTimer) {
       clearTimeout(debounceTimer);
     }
@@ -188,21 +421,63 @@ function observeToolbar(debug) {
       debounceTimer = null;
       runPatch();
     }, PATCH_DEBOUNCE_MS);
+  };
+
+  const runPatch = () => {
+    if (isPatching || document.hidden) {
+      return;
+    }
+
+    isPatching = true;
+    try {
+      patchAllToolbarButtons();
+    } finally {
+      isPatching = false;
+    }
+  };
+
+  const observer = new MutationObserver((mutations) => {
+    const hasRelevantChildMutation = mutations.some(
+      (mutation) =>
+        mutation.type === "childList" &&
+        ([...mutation.addedNodes, ...mutation.removedNodes].some(
+          (node) =>
+            node.nodeType === Node.ELEMENT_NODE &&
+            (node.matches?.(TOOLBAR_BUTTON_SELECTOR) ||
+              node.querySelector?.(TOOLBAR_BUTTON_SELECTOR) ||
+              node.matches?.(".d-editor-button-bar") ||
+              node.querySelector?.(".d-editor-button-bar"))
+        ) || mutation.target.closest?.(".d-editor-button-bar"))
+    );
+
+    if (hasRelevantChildMutation) {
+      schedulePatch();
+    }
   });
 
   observer.observe(document.body, {
     childList: true,
     subtree: true,
-    attributes: true,
-    // Watch source-ish mutations only; avoid observing aria-* writes done by this patcher.
-    attributeFilter: ["title", "class", "data-identifier", "id"],
   });
+
+  visibilityHandler = () => {
+    if (!document.hidden) {
+      schedulePatch();
+    }
+  };
+
+  document.addEventListener("visibilitychange", visibilityHandler);
 
   return {
     disconnect() {
       observer.disconnect();
+
       if (debounceTimer) {
         clearTimeout(debounceTimer);
+      }
+
+      if (visibilityHandler) {
+        document.removeEventListener("visibilitychange", visibilityHandler);
       }
     },
   };
@@ -210,6 +485,7 @@ function observeToolbar(debug) {
 
 export default apiInitializer((api) => {
   let observer = null;
+  let mentionObserver = null;
 
   api.onPageChange(() => {
     if (observer) {
@@ -217,11 +493,15 @@ export default apiInitializer((api) => {
       observer = null;
     }
 
-    const debug = Boolean(settings.aria_patches_debug);
+    if (mentionObserver) {
+      mentionObserver.disconnect();
+      mentionObserver = null;
+    }
 
-    patchAllToolbarButtons(debug);
-    observer = observeToolbar(debug);
+    patchAllToolbarButtons();
+    observer = observeToolbar();
+    mentionObserver = observeMentionAutocomplete();
 
-    debugLog(debug, "started");
+    debugLog("started");
   });
 });
