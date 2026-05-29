@@ -1,0 +1,5 @@
+aria_patches_debug:
+  type: bool
+  default: false
+  description: "Enable console debug logs for ARIA patches."
+  refresh: true
