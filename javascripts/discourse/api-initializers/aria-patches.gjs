@@ -2,9 +2,14 @@ import { apiInitializer } from "discourse/lib/api";
 
 const TOOLBAR_BUTTON_SELECTOR = ".d-editor-button-bar .toolbar__button";
 const MENTION_AUTOCOMPLETE_SELECTOR = ".autocomplete.ac-user";
+const SEARCH_RESULT_TOPIC_SELECTOR = ".search-result-topic .topic";
+const ADVANCED_SEARCH_RESULT_TOPIC_SELECTOR =
+  ".search-results .fps-result .fps-topic .topic";
 const PATCH_DEBOUNCE_MS = 60;
 const MENTION_DEBOUNCE_MS = 80;
+const SEARCH_DEBOUNCE_MS = 80;
 const MENTION_LIVE_REGION_ID = "aria-patches-mention-live-region";
+let searchTitleIdCounter = 0;
 
 function debugLog(event, payload = {}) {
   if (!settings?.aria_patches_debug) {
@@ -197,6 +202,145 @@ function patchAllToolbarButtons() {
   document.querySelectorAll(TOOLBAR_BUTTON_SELECTOR).forEach((button) => {
     patchToolbarButton(button);
   });
+}
+
+function getSearchResultTopicLabel(topicElement) {
+  const preferredText =
+    topicElement.querySelector(".first-line .topic-title a span")?.textContent ||
+    topicElement.querySelector(".first-line .topic-title a")?.textContent ||
+    topicElement.querySelector("a .topic-title")?.textContent ||
+    topicElement.querySelector("a")?.textContent ||
+    "";
+
+  return preferredText.replace(/\s+/g, " ").trim();
+}
+
+function patchSearchResultTopicLabel(topicElement) {
+  const label = getSearchResultTopicLabel(topicElement);
+  if (!label) {
+    return;
+  }
+
+  const resultContainer = topicElement.closest(".search-result-topic, .fps-result");
+  const target = resultContainer || topicElement;
+  const topicTitleElement =
+    topicElement.querySelector(".first-line .topic-title") ||
+    topicElement.querySelector(".topic-title");
+  const topicLink =
+    topicElement.querySelector("a.search-link") ||
+    topicElement.querySelector(".first-line .topic-title a") ||
+    topicElement.querySelector("a");
+
+  let changed = false;
+
+  if (topicElement !== target && topicElement.hasAttribute("aria-label")) {
+    topicElement.removeAttribute("aria-label");
+    changed = true;
+  }
+
+  if (target.hasAttribute("aria-label")) {
+    target.removeAttribute("aria-label");
+    changed = true;
+  }
+
+  const topicId =
+    topicElement.closest(".fps-topic")?.getAttribute("data-topic-id") ||
+    topicElement
+      .querySelector(".topic-title[data-topic-id]")
+      ?.getAttribute("data-topic-id") ||
+    target.getAttribute("data-topic-id") ||
+    "";
+  const fallbackId =
+    target.dataset.ariaPatchesResultId || `generated-${++searchTitleIdCounter}`;
+  const stableIdPart = topicId || fallbackId;
+
+  if (!topicId && !target.dataset.ariaPatchesResultId) {
+    target.dataset.ariaPatchesResultId = fallbackId;
+  }
+
+  const srLabelId = `aria-patches-search-result-label-${stableIdPart}`;
+  let srLabel = target.querySelector(":scope > .aria-patches-search-sr-label");
+
+  if (!srLabel) {
+    srLabel = document.createElement("span");
+    srLabel.className = "aria-patches-search-sr-label";
+    srLabel.style.position = "absolute";
+    srLabel.style.width = "1px";
+    srLabel.style.height = "1px";
+    srLabel.style.padding = "0";
+    srLabel.style.margin = "-1px";
+    srLabel.style.overflow = "hidden";
+    srLabel.style.clip = "rect(0, 0, 0, 0)";
+    srLabel.style.whiteSpace = "nowrap";
+    srLabel.style.border = "0";
+    target.appendChild(srLabel);
+    changed = true;
+  }
+
+  if (srLabel.id !== srLabelId) {
+    srLabel.id = srLabelId;
+    changed = true;
+  }
+
+  if (srLabel.textContent !== label) {
+    srLabel.textContent = label;
+    changed = true;
+  }
+
+  if (target.getAttribute("aria-labelledby") !== srLabel.id) {
+    target.setAttribute("aria-labelledby", srLabel.id);
+    changed = true;
+  }
+
+  if (topicLink && topicLink.getAttribute("aria-label") !== label) {
+    topicLink.setAttribute("aria-label", label);
+    changed = true;
+  }
+
+  // Keep result announcement focused on the topic title by hiding secondary
+  // metadata blocks from assistive tech for search result containers.
+  const metadataSelectors = target.classList.contains("fps-result")
+    ? [".search-category", ".blurb", ".like-count"]
+    : [".second-line"];
+
+  metadataSelectors.forEach((selector) => {
+    const metadata = target.querySelector(selector);
+    if (metadata && metadata.getAttribute("aria-hidden") !== "true") {
+      metadata.setAttribute("aria-hidden", "true");
+      changed = true;
+    }
+  });
+
+  // In full-page search entries, NVDA often picks the avatar/user link first and
+  // skips the topic label context. Hide that decorative author block from AT so
+  // the topic result label/link is announced instead.
+  if (target.classList.contains("fps-result")) {
+    const authorWrapper = target.querySelector(":scope > .author");
+    if (authorWrapper && authorWrapper.getAttribute("aria-hidden") !== "true") {
+      authorWrapper.setAttribute("aria-hidden", "true");
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    debugLog("set-search-result-topic-label", {
+      label,
+      targetClass: target.className,
+      hasTopicLink: Boolean(topicLink),
+    });
+  }
+}
+
+function patchAllSearchResultTopicLabels() {
+  document.querySelectorAll(SEARCH_RESULT_TOPIC_SELECTOR).forEach((topicElement) => {
+    patchSearchResultTopicLabel(topicElement);
+  });
+
+  document
+    .querySelectorAll(ADVANCED_SEARCH_RESULT_TOPIC_SELECTOR)
+    .forEach((topicElement) => {
+      patchSearchResultTopicLabel(topicElement);
+    });
 }
 
 function ensureMentionLiveRegion() {
@@ -523,9 +667,97 @@ function observeToolbar() {
   };
 }
 
+function observeSearchResultTopics() {
+  let isPatching = false;
+  let debounceTimer = null;
+  let visibilityHandler = null;
+
+  const schedulePatch = () => {
+    if (document.hidden) {
+      return;
+    }
+
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      runPatch();
+    }, SEARCH_DEBOUNCE_MS);
+  };
+
+  const runPatch = () => {
+    if (isPatching || document.hidden) {
+      return;
+    }
+
+    isPatching = true;
+    try {
+      patchAllSearchResultTopicLabels();
+    } finally {
+      isPatching = false;
+    }
+  };
+
+  const observer = new MutationObserver((mutations) => {
+    const hasRelevantMutation = mutations.some(
+      (mutation) =>
+        mutation.type === "childList" &&
+        ([...mutation.addedNodes, ...mutation.removedNodes].some(
+          (node) =>
+            node.nodeType === Node.ELEMENT_NODE &&
+            (node.matches?.(SEARCH_RESULT_TOPIC_SELECTOR) ||
+              node.querySelector?.(SEARCH_RESULT_TOPIC_SELECTOR) ||
+              node.matches?.(ADVANCED_SEARCH_RESULT_TOPIC_SELECTOR) ||
+              node.querySelector?.(ADVANCED_SEARCH_RESULT_TOPIC_SELECTOR) ||
+              node.matches?.(".search-result-topic") ||
+              node.querySelector?.(".search-result-topic") ||
+              node.matches?.(".fps-result") ||
+              node.querySelector?.(".fps-result"))
+        ) ||
+          mutation.target.closest?.(".search-result-topic") ||
+          mutation.target.closest?.(".fps-result"))
+    );
+
+    if (hasRelevantMutation) {
+      schedulePatch();
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+
+  visibilityHandler = () => {
+    if (!document.hidden) {
+      schedulePatch();
+    }
+  };
+
+  document.addEventListener("visibilitychange", visibilityHandler);
+  runPatch();
+
+  return {
+    disconnect() {
+      observer.disconnect();
+
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+
+      if (visibilityHandler) {
+        document.removeEventListener("visibilitychange", visibilityHandler);
+      }
+    },
+  };
+}
+
 export default apiInitializer((api) => {
   let observer = null;
   let mentionObserver = null;
+  let searchObserver = null;
 
   api.onPageChange(() => {
     if (observer) {
@@ -538,9 +770,15 @@ export default apiInitializer((api) => {
       mentionObserver = null;
     }
 
+    if (searchObserver) {
+      searchObserver.disconnect();
+      searchObserver = null;
+    }
+
     patchAllToolbarButtons();
     observer = observeToolbar();
     mentionObserver = observeMentionAutocomplete();
+    searchObserver = observeSearchResultTopics();
 
     debugLog("started");
   });
