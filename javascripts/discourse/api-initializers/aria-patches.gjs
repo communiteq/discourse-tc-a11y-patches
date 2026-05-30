@@ -238,23 +238,52 @@ function patchMentionAutocompleteA11y(container) {
   });
 }
 
-function buildMentionAnnouncement(container) {
+function getMentionAutocompleteState(container) {
   const options = Array.from(container.querySelectorAll("li a"));
   const count = options.length;
+  const labels = options.map((option) => getAccessibleText(option));
 
   if (count === 0) {
-    return "No mention suggestions.";
+    return {
+      count,
+      labels,
+      selectedText: "",
+    };
   }
 
   const selected = container.querySelector("li a.selected");
-  if (selected) {
-    const selectedText = getAccessibleText(selected);
-    if (selectedText) {
-      return `${count} mention suggestions. Selected ${selectedText}.`;
-    }
+  return {
+    count,
+    labels,
+    selectedText: selected ? getAccessibleText(selected) : "",
+  };
+}
+
+function buildMentionAnnouncement(nextState, previousState) {
+  if (nextState.count === 0) {
+    return "No mention suggestions.";
   }
 
-  return `${count} mention suggestions available.`;
+  const labelsChanged =
+    nextState.count !== previousState.lastCount ||
+    nextState.labels.join("|") !== previousState.lastLabels.join("|");
+
+  if (labelsChanged) {
+    if (nextState.selectedText) {
+      return `${nextState.count} mention suggestions available. Selected ${nextState.selectedText}.`;
+    }
+
+    return `${nextState.count} mention suggestions available.`;
+  }
+
+  if (
+    nextState.selectedText &&
+    nextState.selectedText !== previousState.lastSelectedText
+  ) {
+    return `Selected ${nextState.selectedText}.`;
+  }
+
+  return "";
 }
 
 function patchMentionAutocompletes(state) {
@@ -265,6 +294,9 @@ function patchMentionAutocompletes(state) {
     if (state.lastAnnouncement) {
       liveRegion.textContent = "Mention suggestions closed.";
       state.lastAnnouncement = "";
+      state.lastCount = 0;
+      state.lastLabels = [];
+      state.lastSelectedText = "";
       debugLog("mention-live-close");
     }
     return;
@@ -272,7 +304,12 @@ function patchMentionAutocompletes(state) {
 
   containers.forEach((container) => {
     patchMentionAutocompleteA11y(container);
-    const message = buildMentionAnnouncement(container);
+    const nextState = getMentionAutocompleteState(container);
+    const message = buildMentionAnnouncement(nextState, state);
+
+    state.lastCount = nextState.count;
+    state.lastLabels = nextState.labels;
+    state.lastSelectedText = nextState.selectedText;
 
     if (message && message !== state.lastAnnouncement) {
       liveRegion.textContent = message;
@@ -290,6 +327,9 @@ function observeMentionAutocomplete() {
   const containerObservers = new Map();
   const state = {
     lastAnnouncement: "",
+    lastCount: 0,
+    lastLabels: [],
+    lastSelectedText: "",
   };
 
   const schedulePatch = () => {
