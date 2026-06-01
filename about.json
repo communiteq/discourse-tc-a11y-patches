@@ -1,6 +1,6 @@
 {
-  "name": "ARIA Patches",
+  "name": "A11y Patches",
   "component": true,
-  "authors": "GitHub Copilot",
-  "theme_version": "2026.05.29"
+  "authors": "Communiteq",
+  "theme_version": "2026.06.01"
 }
