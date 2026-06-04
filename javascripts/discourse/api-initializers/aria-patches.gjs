@@ -12,6 +12,18 @@ const SEARCH_DEBOUNCE_MS = 80;
 const MENTION_LIVE_REGION_ID = "aria-patches-mention-live-region";
 let searchTitleIdCounter = 0;
 
+function isComposerTitleFocused() {
+  const active = document.activeElement;
+
+  if (!active) {
+    return false;
+  }
+
+  return Boolean(
+    active.matches?.("#reply-title, .composer-fields .title-input")
+  );
+}
+
 function debugLog(event, payload = {}) {
   if (!settings?.aria_patches_debug) {
     return;
@@ -406,7 +418,7 @@ function getMentionAutocompleteState(container) {
 
 function buildMentionAnnouncement(nextState, previousState) {
   if (nextState.count === 0) {
-    return i18n(themePrefix("mention_suggestions.none"));
+    return "";
   }
 
   const labelsChanged =
@@ -443,20 +455,25 @@ function patchMentionAutocompletes(state) {
   const containers = document.querySelectorAll(MENTION_AUTOCOMPLETE_SELECTOR);
 
   if (containers.length === 0) {
-    if (state.lastAnnouncement) {
-      liveRegion.textContent = i18n(themePrefix("mention_suggestions.closed"));
-      state.lastAnnouncement = "";
-      state.lastCount = 0;
-      state.lastLabels = [];
-      state.lastSelectedText = "";
-      debugLog("mention-live-close");
-    }
+    state.lastAnnouncement = "";
+    state.lastCount = 0;
+    state.lastLabels = [];
+    state.lastSelectedText = "";
     return;
   }
 
   containers.forEach((container) => {
     patchMentionAutocompleteA11y(container);
     const nextState = getMentionAutocompleteState(container);
+
+    if (nextState.count === 0) {
+      state.lastCount = 0;
+      state.lastLabels = [];
+      state.lastSelectedText = "";
+      state.lastAnnouncement = "";
+      return;
+    }
+
     const message = buildMentionAnnouncement(nextState, state);
 
     state.lastCount = nextState.count;
@@ -485,7 +502,7 @@ function observeMentionAutocomplete() {
   };
 
   const schedulePatch = () => {
-    if (document.hidden) {
+    if (document.hidden || isComposerTitleFocused()) {
       return;
     }
 
@@ -534,7 +551,7 @@ function observeMentionAutocomplete() {
   };
 
   const runPatch = () => {
-    if (isPatching || document.hidden) {
+    if (isPatching || document.hidden || isComposerTitleFocused()) {
       return;
     }
 
@@ -601,7 +618,7 @@ function observeToolbar() {
   let visibilityHandler = null;
 
   const schedulePatch = () => {
-    if (document.hidden) {
+    if (document.hidden || isComposerTitleFocused()) {
       return;
     }
 
@@ -616,7 +633,7 @@ function observeToolbar() {
   };
 
   const runPatch = () => {
-    if (isPatching || document.hidden) {
+    if (isPatching || document.hidden || isComposerTitleFocused()) {
       return;
     }
 
@@ -681,7 +698,7 @@ function observeSearchResultTopics() {
   let visibilityHandler = null;
 
   const schedulePatch = () => {
-    if (document.hidden) {
+    if (document.hidden || isComposerTitleFocused()) {
       return;
     }
 
@@ -696,7 +713,7 @@ function observeSearchResultTopics() {
   };
 
   const runPatch = () => {
-    if (isPatching || document.hidden) {
+    if (isPatching || document.hidden || isComposerTitleFocused()) {
       return;
     }
 
