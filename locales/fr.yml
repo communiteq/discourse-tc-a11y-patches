@@ -1,0 +1,7 @@
+fr:
+  mention_suggestions:
+    none: "Aucune suggestion de mention."
+    available: "%{count} suggestions de mention disponibles."
+    available_selected: "%{count} suggestions de mention disponibles. Sélectionné %{selected_text}."
+    selected: "%{selected_text} sélectionné."
+    closed: "Suggestions de mention fermées."

@@ -1,0 +1,7 @@
+uk:
+  mention_suggestions:
+    none: "Немає варіантів згадок."
+    available: "Доступно варіантів згадок: %{count}."
+    available_selected: "Доступно варіантів згадок: %{count}. Вибрано %{selected_text}."
+    selected: "Вибрано %{selected_text}."
+    closed: "Підказки згадок закрито."

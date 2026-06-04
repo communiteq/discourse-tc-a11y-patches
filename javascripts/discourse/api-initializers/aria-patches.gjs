@@ -1,4 +1,5 @@
 import { apiInitializer } from "discourse/lib/api";
+import { i18n } from "discourse-i18n";
 
 const TOOLBAR_BUTTON_SELECTOR = ".d-editor-button-bar .toolbar__button";
 const MENTION_AUTOCOMPLETE_SELECTOR = ".autocomplete.ac-user";
@@ -405,7 +406,7 @@ function getMentionAutocompleteState(container) {
 
 function buildMentionAnnouncement(nextState, previousState) {
   if (nextState.count === 0) {
-    return "No mention suggestions.";
+    return i18n(themePrefix("mention_suggestions.none"));
   }
 
   const labelsChanged =
@@ -414,17 +415,24 @@ function buildMentionAnnouncement(nextState, previousState) {
 
   if (labelsChanged) {
     if (nextState.selectedText) {
-      return `${nextState.count} mention suggestions available. Selected ${nextState.selectedText}.`;
+      return i18n(themePrefix("mention_suggestions.available_selected"), {
+        count: nextState.count,
+        selected_text: nextState.selectedText,
+      });
     }
 
-    return `${nextState.count} mention suggestions available.`;
+    return i18n(themePrefix("mention_suggestions.available"), {
+      count: nextState.count,
+    });
   }
 
   if (
     nextState.selectedText &&
     nextState.selectedText !== previousState.lastSelectedText
   ) {
-    return `Selected ${nextState.selectedText}.`;
+    return i18n(themePrefix("mention_suggestions.selected"), {
+      selected_text: nextState.selectedText,
+    });
   }
 
   return "";
@@ -436,7 +444,7 @@ function patchMentionAutocompletes(state) {
 
   if (containers.length === 0) {
     if (state.lastAnnouncement) {
-      liveRegion.textContent = "Mention suggestions closed.";
+      liveRegion.textContent = i18n(themePrefix("mention_suggestions.closed"));
       state.lastAnnouncement = "";
       state.lastCount = 0;
       state.lastLabels = [];

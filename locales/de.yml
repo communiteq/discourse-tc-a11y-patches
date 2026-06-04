@@ -1,0 +1,7 @@
+de:
+  mention_suggestions:
+    none: "Keine Erwähnungsvorschläge."
+    available: "%{count} Erwähnungsvorschläge verfügbar."
+    available_selected: "%{count} Erwähnungsvorschläge verfügbar. Ausgewählt: %{selected_text}."
+    selected: "%{selected_text} ausgewählt."
+    closed: "Erwähnungsvorschläge geschlossen."

@@ -1,0 +1,7 @@
+ar:
+  mention_suggestions:
+    none: "لا توجد اقتراحات للذكر."
+    available: "اقتراحات الذكر المتاحة: %{count}."
+    available_selected: "اقتراحات الذكر المتاحة: %{count}. المحدد %{selected_text}."
+    selected: "تم تحديد %{selected_text}."
+    closed: "تم إغلاق اقتراحات الذكر."

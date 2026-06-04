@@ -1,0 +1,7 @@
+ru:
+  mention_suggestions:
+    none: "Нет вариантов упоминаний."
+    available: "Доступно вариантов упоминаний: %{count}."
+    available_selected: "Доступно вариантов упоминаний: %{count}. Выбрано %{selected_text}."
+    selected: "Выбрано %{selected_text}."
+    closed: "Подсказки упоминаний закрыты."
