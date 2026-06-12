@@ -5,3 +5,8 @@ en:
     available_selected: "%{count} mention suggestions available. Selected %{selected_text}."
     selected: "Selected %{selected_text}."
     closed: "Mention suggestions closed."
+  post_like_count:
+    one: "%{count} like"
+    other: "%{count} likes"
+  post_like_users:
+    dialog_label: "People who liked this post"

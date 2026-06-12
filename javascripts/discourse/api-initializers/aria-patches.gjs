@@ -6,11 +6,16 @@ const MENTION_AUTOCOMPLETE_SELECTOR = ".autocomplete.ac-user";
 const SEARCH_RESULT_TOPIC_SELECTOR = ".search-result-topic .topic";
 const ADVANCED_SEARCH_RESULT_TOPIC_SELECTOR =
   ".search-results .fps-result .fps-topic .topic";
+const POST_LIKE_COUNT_SELECTOR = ".post-action-menu__like-count";
+const POST_LIKE_TOGGLE_SELECTOR = ".post-action-menu__like.toggle-like";
+const LIKE_MENU_PORTAL_SELECTOR = "#d-menu-portals";
 const PATCH_DEBOUNCE_MS = 60;
 const MENTION_DEBOUNCE_MS = 80;
 const SEARCH_DEBOUNCE_MS = 80;
+const POST_LIKE_DEBOUNCE_MS = 90;
 const MENTION_LIVE_REGION_ID = "aria-patches-mention-live-region";
 let searchTitleIdCounter = 0;
+let likeUsersPopupIdCounter = 0;
 
 function isComposerTitleFocused() {
   const active = document.activeElement;
@@ -49,6 +54,226 @@ function getAccessibleText(element) {
   )
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function getNumericTextValue(text) {
+  const digitsOnly = (text || "").replace(/[^0-9]/g, "");
+  const parsed = Number.parseInt(digitsOnly, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function getLikeCountValue(button) {
+  const fromAccessibleAttrs = getNumericTextValue(
+    button.getAttribute("label") || button.getAttribute("title") || ""
+  );
+
+  if (fromAccessibleAttrs !== null) {
+    return fromAccessibleAttrs;
+  }
+
+  // Avoid parsing digits from our injected SR labels, which can cause
+  // repeated growth like 1 -> 11 -> 111 on rapid observer re-patches.
+  const clone = button.cloneNode(true);
+  clone
+    .querySelectorAll(
+      ":scope > .aria-patches-like-count-sr-label, :scope > .aria-patches-sr-label"
+    )
+    .forEach((element) => {
+      element.remove();
+    });
+
+  return getNumericTextValue(clone.textContent || "");
+}
+
+function ensureElementId(element, prefix) {
+  if (!element) {
+    return "";
+  }
+
+  if (!element.id) {
+    likeUsersPopupIdCounter += 1;
+    element.id = `${prefix}-${likeUsersPopupIdCounter}`;
+  }
+
+  return element.id;
+}
+
+function ensureButtonScreenReaderLabel(button, idPrefix, className, labelText) {
+  if (!button || !labelText) {
+    return false;
+  }
+
+  const idBase =
+    button.getAttribute("data-identifier") ||
+    button.id ||
+    button.className.replace(/\s+/g, "-");
+  const srId = `${idPrefix}-${idBase}`;
+
+  let changed = false;
+  let srLabel = button.querySelector(`:scope > .${className}`);
+
+  if (!srLabel) {
+    srLabel = document.createElement("span");
+    srLabel.className = className;
+    srLabel.style.position = "absolute";
+    srLabel.style.width = "1px";
+    srLabel.style.height = "1px";
+    srLabel.style.padding = "0";
+    srLabel.style.margin = "-1px";
+    srLabel.style.overflow = "hidden";
+    srLabel.style.clip = "rect(0, 0, 0, 0)";
+    srLabel.style.whiteSpace = "nowrap";
+    srLabel.style.border = "0";
+    button.appendChild(srLabel);
+    changed = true;
+  }
+
+  if (srLabel.id !== srId) {
+    srLabel.id = srId;
+    changed = true;
+  }
+
+  if (srLabel.textContent !== labelText) {
+    srLabel.textContent = labelText;
+    changed = true;
+  }
+
+  if (button.getAttribute("aria-labelledby") !== srId) {
+    button.setAttribute("aria-labelledby", srId);
+    changed = true;
+  }
+
+  return changed;
+}
+
+function getLikeCountLabel(count) {
+  if (count === null) {
+    return "";
+  }
+
+  const key = count === 1 ? "post_like_count.one" : "post_like_count.other";
+  return i18n(themePrefix(key), { count });
+}
+
+function getLikeUsersDialogLabel() {
+  return i18n(themePrefix("post_like_users.dialog_label"));
+}
+
+function findLikeUsersPopup(triggerButton) {
+  const identifier =
+    triggerButton.getAttribute("data-identifier") || triggerButton.id || "";
+
+  if (!identifier) {
+    return null;
+  }
+
+  const root = document.querySelector(LIKE_MENU_PORTAL_SELECTOR) || document.body;
+  const selectorParts = [
+    `.fk-d-menu[data-identifier="${identifier}"]`,
+    `.fk-d-menu-modal[data-identifier="${identifier}"]`,
+    `.fk-d-menu[data-identifier="${identifier}-content"]`,
+    `.fk-d-menu-modal[data-identifier="${identifier}-content"]`,
+    `[data-identifier="${identifier}"]`,
+    `[data-identifier="${identifier}-content"]`,
+  ];
+
+  return root.querySelector(selectorParts.join(", "));
+}
+
+function patchLikeCountButton(button) {
+  let changed = false;
+  const count = getLikeCountValue(button);
+  const currentAriaLabel = button.getAttribute("aria-label") || "";
+  const fallbackLabel =
+    button.getAttribute("label") || button.getAttribute("title") || "";
+  const nextAriaLabel = getLikeCountLabel(count) || fallbackLabel;
+
+  if (nextAriaLabel && currentAriaLabel !== nextAriaLabel) {
+    button.setAttribute("aria-label", nextAriaLabel);
+    changed = true;
+  }
+
+  if (
+    ensureButtonScreenReaderLabel(
+      button,
+      "aria-patches-like-count",
+      "aria-patches-like-count-sr-label",
+      nextAriaLabel
+    )
+  ) {
+    changed = true;
+  }
+
+  if (button.getAttribute("aria-haspopup") !== "dialog") {
+    button.setAttribute("aria-haspopup", "dialog");
+    changed = true;
+  }
+
+  const popup = findLikeUsersPopup(button);
+  if (popup) {
+    const popupId = ensureElementId(popup, "aria-patches-like-users-popup");
+    if (popupId && button.getAttribute("aria-controls") !== popupId) {
+      button.setAttribute("aria-controls", popupId);
+      changed = true;
+    }
+
+    if (!popup.getAttribute("role")) {
+      popup.setAttribute("role", "dialog");
+      changed = true;
+    }
+
+    const dialogLabel = getLikeUsersDialogLabel();
+    if (dialogLabel && popup.getAttribute("aria-label") !== dialogLabel) {
+      popup.setAttribute("aria-label", dialogLabel);
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    debugLog("patch-like-count-button", {
+      id: button.id,
+      count,
+      ariaLabel: button.getAttribute("aria-label"),
+      controls: button.getAttribute("aria-controls"),
+    });
+  }
+}
+
+function patchToggleLikeButton(button) {
+  // Do not override native title/label — Discourse already sets "like this
+  // post" / "undo like" correctly. We only ensure NVDA can read it (via
+  // aria-label mirroring the native title) and announce toggle state.
+  let changed = false;
+
+  const title = button.getAttribute("title");
+  const nextAriaLabel = title ? cleanedAriaLabel(title) || title : "";
+  if (nextAriaLabel && button.getAttribute("aria-label") !== nextAriaLabel) {
+    button.setAttribute("aria-label", nextAriaLabel);
+    changed = true;
+  }
+
+  const nextAriaPressed = button.classList.contains("my-likes") ? "true" : "false";
+  if (button.getAttribute("aria-pressed") !== nextAriaPressed) {
+    button.setAttribute("aria-pressed", nextAriaPressed);
+    changed = true;
+  }
+
+  if (changed) {
+    debugLog("patch-toggle-like-button", {
+      ariaLabel: button.getAttribute("aria-label"),
+      ariaPressed: button.getAttribute("aria-pressed"),
+    });
+  }
+}
+
+function patchAllPostLikeControls() {
+  document.querySelectorAll(POST_LIKE_COUNT_SELECTOR).forEach((button) => {
+    patchLikeCountButton(button);
+  });
+
+  document.querySelectorAll(POST_LIKE_TOGGLE_SELECTOR).forEach((button) => {
+    patchToggleLikeButton(button);
+  });
 }
 
 function setAriaLabelFromTitle(button) {
@@ -779,10 +1004,163 @@ function observeSearchResultTopics() {
   };
 }
 
+function observePostLikeControls() {
+  let isPatching = false;
+  let debounceTimer = null;
+  let visibilityHandler = null;
+  const interactionTimers = new Set();
+
+  const schedulePatch = () => {
+    if (document.hidden || isComposerTitleFocused()) {
+      return;
+    }
+
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      runPatch();
+    }, POST_LIKE_DEBOUNCE_MS);
+  };
+
+  const runPatch = () => {
+    if (isPatching || document.hidden || isComposerTitleFocused()) {
+      return;
+    }
+
+    isPatching = true;
+    try {
+      patchAllPostLikeControls();
+    } finally {
+      isPatching = false;
+    }
+  };
+
+  const scheduleInteractionFollowups = () => {
+    [0, 140, 420].forEach((delay) => {
+      const timerId = setTimeout(() => {
+        interactionTimers.delete(timerId);
+        schedulePatch();
+      }, delay);
+
+      interactionTimers.add(timerId);
+    });
+  };
+
+  const interactionHandler = (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    if (
+      !target.closest(
+        `${POST_LIKE_COUNT_SELECTOR}, ${POST_LIKE_TOGGLE_SELECTOR}, .post-action-menu__double-button`
+      )
+    ) {
+      return;
+    }
+
+    scheduleInteractionFollowups();
+  };
+
+  const observer = new MutationObserver((mutations) => {
+    const hasRelevantMutation = mutations.some(
+      (mutation) =>
+        (mutation.type === "childList" &&
+          ([...mutation.addedNodes, ...mutation.removedNodes].some(
+            (node) =>
+              node.nodeType === Node.ELEMENT_NODE &&
+              (node.matches?.(POST_LIKE_COUNT_SELECTOR) ||
+                node.querySelector?.(POST_LIKE_COUNT_SELECTOR) ||
+                node.matches?.(POST_LIKE_TOGGLE_SELECTOR) ||
+                node.querySelector?.(POST_LIKE_TOGGLE_SELECTOR) ||
+                node.matches?.(".post-action-menu__double-button") ||
+                node.querySelector?.(".post-action-menu__double-button") ||
+                node.matches?.(".fk-d-menu") ||
+                node.querySelector?.(".fk-d-menu") ||
+                node.matches?.(".fk-d-menu-modal") ||
+                node.querySelector?.(".fk-d-menu-modal"))
+          ) ||
+            mutation.target.closest?.(".post-action-menu") ||
+            mutation.target.closest?.(LIKE_MENU_PORTAL_SELECTOR))) ||
+        (mutation.type === "attributes" &&
+          (mutation.target.matches?.(POST_LIKE_COUNT_SELECTOR) ||
+            mutation.target.matches?.(POST_LIKE_TOGGLE_SELECTOR) ||
+            mutation.target.closest?.(".post-action-menu") ||
+            mutation.target.closest?.(LIKE_MENU_PORTAL_SELECTOR))) ||
+        (mutation.type === "characterData" &&
+          (mutation.target.parentElement?.closest?.(POST_LIKE_COUNT_SELECTOR) ||
+            mutation.target.parentElement?.closest?.(POST_LIKE_TOGGLE_SELECTOR) ||
+            mutation.target.parentElement?.closest?.(".post-action-menu") ||
+            mutation.target.parentElement?.closest?.(LIKE_MENU_PORTAL_SELECTOR)))
+    );
+
+    if (hasRelevantMutation) {
+      schedulePatch();
+    }
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    characterData: true,
+    attributeFilter: [
+      "class",
+      "aria-expanded",
+      "aria-pressed",
+      "aria-label",
+      "title",
+      "label",
+      "disabled",
+      "aria-disabled",
+      "data-identifier",
+    ],
+  });
+
+  document.addEventListener("click", interactionHandler, true);
+  document.addEventListener("keydown", interactionHandler, true);
+
+  visibilityHandler = () => {
+    if (!document.hidden) {
+      schedulePatch();
+    }
+  };
+
+  document.addEventListener("visibilitychange", visibilityHandler);
+  runPatch();
+
+  return {
+    disconnect() {
+      observer.disconnect();
+
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+
+      if (visibilityHandler) {
+        document.removeEventListener("visibilitychange", visibilityHandler);
+      }
+
+      document.removeEventListener("click", interactionHandler, true);
+      document.removeEventListener("keydown", interactionHandler, true);
+
+      interactionTimers.forEach((timerId) => {
+        clearTimeout(timerId);
+      });
+      interactionTimers.clear();
+    },
+  };
+}
+
 export default apiInitializer((api) => {
   let observer = null;
   let mentionObserver = null;
   let searchObserver = null;
+  let postLikeObserver = null;
 
   api.onPageChange(() => {
     if (observer) {
@@ -800,10 +1178,17 @@ export default apiInitializer((api) => {
       searchObserver = null;
     }
 
+    if (postLikeObserver) {
+      postLikeObserver.disconnect();
+      postLikeObserver = null;
+    }
+
     patchAllToolbarButtons();
     observer = observeToolbar();
     mentionObserver = observeMentionAutocomplete();
     searchObserver = observeSearchResultTopics();
+    patchAllPostLikeControls();
+    postLikeObserver = observePostLikeControls();
 
     debugLog("started");
   });

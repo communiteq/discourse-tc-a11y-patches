@@ -5,3 +5,8 @@ de:
     available_selected: "%{count} Erwähnungsvorschläge verfügbar. Ausgewählt: %{selected_text}."
     selected: "%{selected_text} ausgewählt."
     closed: "Erwähnungsvorschläge geschlossen."
+  post_like_count:
+    one: "%{count} gefällt mir"
+    other: "%{count} gefällt mir"
+  post_like_users:
+    dialog_label: "Personen, denen dieser Beitrag gefällt"
