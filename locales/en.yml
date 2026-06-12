@@ -10,3 +10,4 @@ en:
     other: "%{count} likes"
   post_like_users:
     dialog_label: "People who liked this post"
+    opened: "People who liked this post list opened"

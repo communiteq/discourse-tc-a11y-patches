@@ -10,3 +10,4 @@ de:
     other: "%{count} gefällt mir"
   post_like_users:
     dialog_label: "Personen, denen dieser Beitrag gefällt"
+    opened: "Liste der Personen, denen dieser Beitrag gefällt, geöffnet"

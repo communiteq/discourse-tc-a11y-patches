@@ -9,6 +9,8 @@ const ADVANCED_SEARCH_RESULT_TOPIC_SELECTOR =
 const POST_LIKE_COUNT_SELECTOR = ".post-action-menu__like-count";
 const POST_LIKE_TOGGLE_SELECTOR = ".post-action-menu__like.toggle-like";
 const LIKE_MENU_PORTAL_SELECTOR = "#d-menu-portals";
+const LIKE_USERS_POPUP_HEADING_CLASS = "aria-patches-like-users-heading";
+const LIKE_USERS_LIVE_REGION_ID = "aria-patches-like-users-live-region";
 const PATCH_DEBOUNCE_MS = 60;
 const MENTION_DEBOUNCE_MS = 80;
 const SEARCH_DEBOUNCE_MS = 80;
@@ -159,6 +161,132 @@ function getLikeUsersDialogLabel() {
   return i18n(themePrefix("post_like_users.dialog_label"));
 }
 
+function getLikeUsersOpenedAnnouncement() {
+  return i18n(themePrefix("post_like_users.opened"));
+}
+
+function ensureLikeUsersLiveRegion() {
+  let liveRegion = document.getElementById(LIKE_USERS_LIVE_REGION_ID);
+
+  if (liveRegion) {
+    return liveRegion;
+  }
+
+  liveRegion = document.createElement("div");
+  liveRegion.id = LIKE_USERS_LIVE_REGION_ID;
+  liveRegion.setAttribute("role", "status");
+  liveRegion.setAttribute("aria-live", "polite");
+  liveRegion.setAttribute("aria-atomic", "true");
+  liveRegion.style.position = "absolute";
+  liveRegion.style.width = "1px";
+  liveRegion.style.height = "1px";
+  liveRegion.style.padding = "0";
+  liveRegion.style.margin = "-1px";
+  liveRegion.style.overflow = "hidden";
+  liveRegion.style.clip = "rect(0, 0, 0, 0)";
+  liveRegion.style.whiteSpace = "nowrap";
+  liveRegion.style.border = "0";
+
+  document.body.appendChild(liveRegion);
+  return liveRegion;
+}
+
+function announceLikeUsersPopupOpened(button) {
+  const isExpanded = button.getAttribute("aria-expanded") === "true";
+  const wasExpanded = button.dataset.ariaPatchesLikeUsersExpanded === "true";
+  button.dataset.ariaPatchesLikeUsersExpanded = isExpanded ? "true" : "false";
+
+  if (!isExpanded || wasExpanded) {
+    return;
+  }
+
+  const message = getLikeUsersOpenedAnnouncement() || getLikeUsersDialogLabel();
+  if (!message) {
+    return;
+  }
+
+  const liveRegion = ensureLikeUsersLiveRegion();
+  liveRegion.textContent = "";
+  window.requestAnimationFrame(() => {
+    liveRegion.textContent = message;
+  });
+
+  debugLog("announce-like-users-popup-opened", {
+    id: button.id,
+    message,
+  });
+}
+
+function isLikeUsersPopupElement(element) {
+  const identifier =
+    element.getAttribute("data-identifier") ||
+    element.getAttribute("data-content-id") ||
+    "";
+
+  if (!identifier) {
+    return false;
+  }
+
+  return (
+    identifier.startsWith("post-like-users") ||
+    Boolean(
+      document.querySelector(
+        `${POST_LIKE_COUNT_SELECTOR}[data-identifier="${identifier}"]`
+      )
+    )
+  );
+}
+
+function patchLikeUsersPopupElement(popup) {
+  let changed = false;
+
+  if (!popup.getAttribute("role")) {
+    popup.setAttribute("role", "dialog");
+    changed = true;
+  }
+
+  const dialogLabel = getLikeUsersDialogLabel();
+  if (dialogLabel && popup.getAttribute("aria-label") !== dialogLabel) {
+    popup.setAttribute("aria-label", dialogLabel);
+    changed = true;
+  }
+
+  // Inject a visually-hidden heading as the first child of the popup.
+  // NVDA announces the first heading when entering a dialog, making this
+  // more reliable than aria-label alone.
+  let heading = popup.querySelector(
+    `:scope > .${LIKE_USERS_POPUP_HEADING_CLASS}`
+  );
+
+  if (!heading) {
+    heading = document.createElement("h2");
+    heading.className = LIKE_USERS_POPUP_HEADING_CLASS;
+    heading.style.position = "absolute";
+    heading.style.width = "1px";
+    heading.style.height = "1px";
+    heading.style.padding = "0";
+    heading.style.margin = "-1px";
+    heading.style.overflow = "hidden";
+    heading.style.clip = "rect(0, 0, 0, 0)";
+    heading.style.whiteSpace = "nowrap";
+    heading.style.border = "0";
+    popup.insertBefore(heading, popup.firstChild);
+    changed = true;
+  }
+
+  if (heading.textContent !== dialogLabel) {
+    heading.textContent = dialogLabel;
+    changed = true;
+  }
+
+  if (changed) {
+    debugLog("patch-like-users-popup", {
+      id: popup.id,
+      ariaLabel: popup.getAttribute("aria-label"),
+    });
+  }
+}
+
 function findLikeUsersPopup(triggerButton) {
   const identifier =
     triggerButton.getAttribute("data-identifier") || triggerButton.id || "";
@@ -228,6 +356,8 @@ function patchLikeCountButton(button) {
       changed = true;
     }
   }
+
+  announceLikeUsersPopupOpened(button);
 
   if (changed) {
     debugLog("patch-like-count-button", {
@@ -1004,6 +1134,72 @@ function observeSearchResultTopics() {
   };
 }
 
+function observeLikeUsersPopup() {
+  const patchAnyVisiblePopups = () => {
+    const root =
+      document.querySelector(LIKE_MENU_PORTAL_SELECTOR) || document.body;
+    root
+      .querySelectorAll(".fk-d-menu, .fk-d-menu-modal")
+      .forEach((element) => {
+        if (isLikeUsersPopupElement(element)) {
+          patchLikeUsersPopupElement(element);
+        }
+      });
+  };
+
+  const observer = new MutationObserver((mutations) => {
+    let needsPatch = false;
+
+    for (const mutation of mutations) {
+      if (mutation.type !== "childList") {
+        continue;
+      }
+
+      for (const node of mutation.addedNodes) {
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+          continue;
+        }
+
+        if (
+          (node.matches?.(".fk-d-menu") ||
+            node.matches?.(".fk-d-menu-modal")) &&
+          isLikeUsersPopupElement(node)
+        ) {
+          needsPatch = true;
+          break;
+        }
+
+        const inner = node.querySelector?.(".fk-d-menu, .fk-d-menu-modal");
+        if (inner && isLikeUsersPopupElement(inner)) {
+          needsPatch = true;
+          break;
+        }
+      }
+
+      if (needsPatch) {
+        break;
+      }
+    }
+
+    if (needsPatch) {
+      patchAnyVisiblePopups();
+    }
+  });
+
+  // Prefer to observe only the portal root to keep this cheap.
+  const portalRoot =
+    document.querySelector(LIKE_MENU_PORTAL_SELECTOR) || document.body;
+  observer.observe(portalRoot, { childList: true, subtree: true });
+
+  patchAnyVisiblePopups();
+
+  return {
+    disconnect() {
+      observer.disconnect();
+    },
+  };
+}
+
 function observePostLikeControls() {
   let isPatching = false;
   let debounceTimer = null;
@@ -1161,6 +1357,7 @@ export default apiInitializer((api) => {
   let mentionObserver = null;
   let searchObserver = null;
   let postLikeObserver = null;
+  let likeUsersPopupObserver = null;
 
   api.onPageChange(() => {
     if (observer) {
@@ -1183,12 +1380,18 @@ export default apiInitializer((api) => {
       postLikeObserver = null;
     }
 
+    if (likeUsersPopupObserver) {
+      likeUsersPopupObserver.disconnect();
+      likeUsersPopupObserver = null;
+    }
+
     patchAllToolbarButtons();
     observer = observeToolbar();
     mentionObserver = observeMentionAutocomplete();
     searchObserver = observeSearchResultTopics();
     patchAllPostLikeControls();
     postLikeObserver = observePostLikeControls();
+    likeUsersPopupObserver = observeLikeUsersPopup();
 
     debugLog("started");
   });
