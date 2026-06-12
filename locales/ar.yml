@@ -5,3 +5,9 @@ ar:
     available_selected: "اقتراحات الذكر المتاحة: %{count}. المحدد %{selected_text}."
     selected: "تم تحديد %{selected_text}."
     closed: "تم إغلاق اقتراحات الذكر."
+  post_like_count:
+    one: "إعجاب واحد"
+    other: "%{count} إعجابات"
+  post_like_users:
+    dialog_label: "الأشخاص الذين أعجبوا بهذا المنشور"
+    opened: "تم فتح قائمة الأشخاص الذين أعجبوا بهذا المنشور"

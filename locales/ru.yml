@@ -5,3 +5,9 @@ ru:
     available_selected: "Доступно вариантов упоминаний: %{count}. Выбрано %{selected_text}."
     selected: "Выбрано %{selected_text}."
     closed: "Подсказки упоминаний закрыты."
+  post_like_count:
+    one: "%{count} отметка «Нравится»"
+    other: "%{count} отметок «Нравится»"
+  post_like_users:
+    dialog_label: "Пользователи, которым понравилась эта публикация"
+    opened: "Открыт список пользователей, которым понравилась эта публикация"

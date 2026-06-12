@@ -5,3 +5,9 @@ uk:
     available_selected: "Доступно варіантів згадок: %{count}. Вибрано %{selected_text}."
     selected: "Вибрано %{selected_text}."
     closed: "Підказки згадок закрито."
+  post_like_count:
+    one: "%{count} вподобайка"
+    other: "%{count} вподобайок"
+  post_like_users:
+    dialog_label: "Користувачі, яким сподобався цей допис"
+    opened: "Відкрито список користувачів, яким сподобався цей допис"

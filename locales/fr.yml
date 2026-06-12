@@ -5,3 +5,9 @@ fr:
     available_selected: "%{count} suggestions de mention disponibles. Sélectionné %{selected_text}."
     selected: "%{selected_text} sélectionné."
     closed: "Suggestions de mention fermées."
+  post_like_count:
+    one: "%{count} mention J'aime"
+    other: "%{count} mentions J'aime"
+  post_like_users:
+    dialog_label: "Personnes ayant aimé cette publication"
+    opened: "Liste des personnes ayant aimé cette publication ouverte"
